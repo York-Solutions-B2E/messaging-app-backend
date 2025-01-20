@@ -10,9 +10,11 @@ import com.example.messaging_app_backend.api.services.MessageService;
 import com.example.messaging_app_backend.api.kafka.KafkaProducer; // Import the Kafka producer
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -34,6 +36,8 @@ public class MessageServiceImpl implements MessageService {
         this.kafkaProducer = kafkaProducer;
         this.objectMapper = objectMapper; // Use the custom ObjectMapper
     }
+
+
 
     @Override
     public MessageDTO sendMessage(MessageDTO messageDTO) {
@@ -71,6 +75,32 @@ public class MessageServiceImpl implements MessageService {
     }
 
     @Override
+    public MessageDTO deleteMessage(Long id) {
+        // Step 1: Find the message by ID
+        Message message = messageRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Message with id " + id + " not found"));
+
+        // Step 2: Update the message status to 'DELETED'
+        message.setStatus(MessageStatus.DELETED);
+        messageRepository.save(message); // Save the updated status to the database
+
+        // Step 3: Create the event to send to Kafka
+        Event event = new Event();
+        event.setId(message.getId());
+        event.setMessage(message.getMessageBody()); // Include the message text if needed
+        event.setTimestamp(LocalDateTime.now());
+        event.setUsername("john doe");
+        event.setUserId(message.getSenderId());
+        event.setStatus("DELETED");
+
+        // Step 4: Send the event to Kafka
+        kafkaProducer.sendEvent(event);
+
+        // Step 5: Map the updated message entity to a DTO and return it
+        return messageMapper.toDTO(message);
+    }
+
+    @Override
     public List<MessageDTO> getAllMessages() {
         // Fetch all messages and convert them to DTOs
         List<Message> messages = messageRepository.findAll();
@@ -90,25 +120,29 @@ public class MessageServiceImpl implements MessageService {
 
         Message existingMessage = optionalMessage.get();
 
-        // Update fields if new values are provided
-        if (updatedMessageDTO.getMessageBody() != null) {
+        // Validate and update the message body
+        if (updatedMessageDTO.getMessageBody() != null && !updatedMessageDTO.getMessageBody().isBlank()) {
             existingMessage.setMessageBody(updatedMessageDTO.getMessageBody());
-        }
-        if (updatedMessageDTO.getSenderId() != null) {
-            existingMessage.setSenderId(updatedMessageDTO.getSenderId());
-        }
-        if (updatedMessageDTO.getReceiverId() != null) {
-            existingMessage.setReceiverId(updatedMessageDTO.getReceiverId());
+        } else {
+            throw new IllegalArgumentException("Message body cannot be null or blank.");
         }
 
-        // Save the updated message
+        // Save the updated message to the database
         Message savedMessage = messageRepository.save(existingMessage);
 
-        // Convert the updated message to JSON and send to Kafka
-        String messageJson = convertMessageToJson(savedMessage);
-//        kafkaProducer.sendEvent("my-topic", messageJson);
+        // Optionally send an update event to Kafka
+        Event updateEvent = new Event();
+        updateEvent.setId(savedMessage.getId());
+        updateEvent.setMessage(savedMessage.getMessageBody());
+        updateEvent.setStatus("UPDATED");
+        updateEvent.setUserId(savedMessage.getSenderId());
+        updateEvent.setTimestamp(savedMessage.getCreatedAt());
+        kafkaProducer.sendEvent(updateEvent);
+        System.out.println("Sending UPDATED event to Kafka: " + updateEvent);
 
         // Convert the updated Entity back to DTO and return
         return messageMapper.toDTO(savedMessage);
     }
+
+
 }

@@ -2,6 +2,7 @@ package com.example.messaging_app_backend.api.controller;
 
 import com.example.messaging_app_backend.api.DTO.MessageDTO;
 import com.example.messaging_app_backend.api.services.MessageService;
+import org.apache.coyote.Response;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -37,5 +38,13 @@ public class MessageController {
             @RequestBody MessageDTO updatedMessageDTO) {
         MessageDTO updatedMessage = messageService.updateMessage(id, updatedMessageDTO);
         return ResponseEntity.ok(updatedMessage);
+    }
+
+    @PutMapping("/{id}/delete")
+    public ResponseEntity<MessageDTO> deletedMessage (
+            @PathVariable Long id
+    ){
+        MessageDTO deletedMessage = messageService.deleteMessage(id);
+        return ResponseEntity.ok(deletedMessage);
     }
 }
